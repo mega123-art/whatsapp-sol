@@ -24,6 +24,21 @@ const PROGRAM_ID = new PublicKey(
 );
 
 // ============================================================================
+// Instruction Discriminators (Sighashes)
+// --- CORRECTED VALUES from the provided IDL ---
+// ============================================================================
+const DISCRIMINATORS = {
+  // Instruction Discriminator (Hex)
+  initializeThread: "cf4e5bb957f48e0b", // [207, 78, 91, 185, 87, 244, 142, 11]
+  sendMessage: "392822b2bd0a411a", // [57, 40, 34, 178, 189, 10, 65, 26]
+  initializeChannel: "e85bb1d47a5ee3fa", // [232, 91, 177, 212, 122, 94, 227, 250]
+  sendBroadcast: "e9f1484d97932059", // [233, 241, 72, 77, 151, 147, 32, 89]
+  subscribeChannel: "ca978c2427df6cb1", // [202, 151, 140, 36, 39, 223, 108, 177]
+  closeThread: "35e71031f7656d0b", // [53, 231, 16, 49, 247, 101, 109, 11]
+  closeChannel: "006824014200679d", // [0, 104, 36, 1, 66, 0, 103, 157]
+};
+
+// ============================================================================
 // Utility Functions
 // ============================================================================
 
@@ -174,8 +189,8 @@ async function initThreadCommand(options: any) {
     spinner.start("Initializing message thread...");
     // Build initialize instruction
     const initData = Buffer.concat([
-      // initialize_thread discriminator (0x8c3c4d7e9a1fb23c)
-      Buffer.from([0x8c, 0x3c, 0x4d, 0x7e, 0x9a, 0x1f, 0xb2, 0x3c]),
+      // Use the hex discriminator for clarity and verification
+      Buffer.from(DISCRIMINATORS.initializeThread, "hex"),
       threadId,
     ]);
     const initIx = new TransactionInstruction({
@@ -226,8 +241,8 @@ async function sendMessageCommand(options: any) {
     if (!accountInfo) {
       throw new Error("Thread not found. Invalid PDA or thread doesn't exist.");
     }
-    // message_count offset for MessageThread
-    const messageCount = accountInfo.data.readUInt32LE(72);
+    // message_count offset for MessageThread: 8 (disc) + 32 + 32 + 32 = 104
+    const messageCount = accountInfo.data.readUInt32LE(104);
     spinner.succeed(chalk.green(`Thread found`));
     console.log(chalk.gray(`  Current messages: ${messageCount}\n`));
 
@@ -241,8 +256,8 @@ async function sendMessageCommand(options: any) {
     // Send message
     spinner.start("Sending message...");
     const messageData = Buffer.concat([
-      // send_message discriminator (0x6ab78781b1ce803a)
-      Buffer.from([0x6a, 0xb7, 0x87, 0x81, 0xb1, 0xce, 0x80, 0x3a]),
+      // Use the hex discriminator for clarity and verification
+      Buffer.from(DISCRIMINATORS.sendMessage, "hex"),
       Buffer.from(new Uint32Array([messageCount]).buffer), // message_index (u32)
       Buffer.from(new Uint32Array([encrypted.length]).buffer), // content length (u32)
       encrypted, // encrypted_content (Vec<u8>)
@@ -292,7 +307,8 @@ async function readMessagesCommand(options: any) {
     const data = accountInfo.data;
     const participantA = new PublicKey(data.slice(8, 40));
     const participantB = new PublicKey(data.slice(40, 72));
-    const messageCount = data.readUInt32LE(72);
+    // message_count offset for MessageThread: 8 (disc) + 32 + 32 + 32 = 104
+    const messageCount = data.readUInt32LE(104);
     spinner.succeed(chalk.green(`Thread metadata retrieved`));
     console.log(chalk.gray(`  Participant A: ${participantA.toBase58()}`));
     console.log(chalk.gray(`  Participant B: ${participantB.toBase58()}`));
@@ -311,9 +327,10 @@ async function readMessagesCommand(options: any) {
     const sharedSecret = options.key || "default-secret-key";
 
     // send_message discriminator prefix for quick check
-    const SEND_MESSAGE_DISCRIMINATOR = Buffer.from([
-      0x6a, 0xb7, 0x87, 0x81, 0xb1, 0xce, 0x80, 0x3a,
-    ]);
+    const SEND_MESSAGE_DISCRIMINATOR = Buffer.from(
+      DISCRIMINATORS.sendMessage,
+      "hex"
+    );
 
     for (const sigInfo of signatures) {
       // NOTE: This can be slow for a thread with thousands of messages
@@ -411,8 +428,8 @@ async function createChannelCommand(options: any) {
     // Build initialize instruction
     const channelNameBytes = Buffer.from(options.name, "utf8");
     const initData = Buffer.concat([
-      // initialize_channel discriminator (0x9d2e1f4a5b3c7d8e)
-      Buffer.from([0x9d, 0x2e, 0x1f, 0x4a, 0x5b, 0x3c, 0x7d, 0x8e]),
+      // Use the hex discriminator for clarity and verification
+      Buffer.from(DISCRIMINATORS.initializeChannel, "hex"),
       Buffer.from(new Uint32Array([channelNameBytes.length]).buffer),
       channelNameBytes,
     ]);
@@ -463,8 +480,8 @@ async function sendBroadcastCommand(options: any) {
         "Channel not found. Invalid PDA or channel doesn't exist."
       );
     }
-    // message_count offset for BroadcastChannel
-    const messageCount = accountInfo.data.readUInt32LE(76); // Corrected offset for BroadcastChannel (8 + 32 + 4 + 32 = 76)
+    // message_count offset for BroadcastChannel: 8 (disc) + 32 + 4 + 32 = 76 (Max name size)
+    const messageCount = accountInfo.data.readUInt32LE(76);
 
     spinner.succeed(chalk.green(`Channel found`));
     console.log(chalk.gray(`  Current broadcasts: ${messageCount}\n`));
@@ -479,8 +496,8 @@ async function sendBroadcastCommand(options: any) {
     // Send broadcast
     spinner.start("Sending broadcast...");
     const broadcastData = Buffer.concat([
-      // send_broadcast discriminator (0xac32997e0e7161b4)
-      Buffer.from([0xac, 0x32, 0x99, 0x7e, 0x0e, 0x71, 0x61, 0xb4]),
+      // Use the hex discriminator for clarity and verification
+      Buffer.from(DISCRIMINATORS.sendBroadcast, "hex"),
       Buffer.from(new Uint32Array([messageCount]).buffer), // message_index (u32)
       Buffer.from(new Uint32Array([encrypted.length]).buffer), // content length (u32)
       encrypted, // encrypted_content (Vec<u8>)
@@ -532,9 +549,7 @@ async function subscribeChannelCommand(options: any) {
 
     spinner.start("Creating subscription account...");
     // Build subscribe instruction
-    const subscribeData = Buffer.from([
-      0x19, 0xa0, 0x84, 0xc7, 0x18, 0xa2, 0x45, 0x59,
-    ]); // subscribe_channel discriminator
+    const subscribeData = Buffer.from(DISCRIMINATORS.subscribeChannel, "hex");
 
     const subscribeIx = new TransactionInstruction({
       programId: PROGRAM_ID,
@@ -608,9 +623,10 @@ async function readBroadcastsCommand(options: any) {
     const sharedSecret = options.key || "default-channel-key";
 
     // send_broadcast discriminator prefix
-    const SEND_BROADCAST_DISCRIMINATOR = Buffer.from([
-      0xac, 0x32, 0x99, 0x7e, 0x0e, 0x71, 0x61, 0xb4,
-    ]);
+    const SEND_BROADCAST_DISCRIMINATOR = Buffer.from(
+      DISCRIMINATORS.sendBroadcast,
+      "hex"
+    );
 
     for (const sigInfo of signatures) {
       try {
@@ -710,9 +726,7 @@ async function closeThreadCommand(options: any) {
 
     spinner.start("Closing thread and refunding rent...");
     // Build close instruction
-    const closeData = Buffer.from([
-      0xf9, 0x4a, 0x4c, 0x51, 0x47, 0x81, 0x74, 0x15,
-    ]); // close_thread discriminator
+    const closeData = Buffer.from(DISCRIMINATORS.closeThread, "hex");
 
     const closeIx = new TransactionInstruction({
       programId: PROGRAM_ID,
@@ -757,9 +771,7 @@ async function closeChannelCommand(options: any) {
 
     spinner.start("Closing channel and refunding rent...");
     // Build close instruction
-    const closeData = Buffer.from([
-      0xf4, 0x18, 0x04, 0xf5, 0x8c, 0x42, 0xa2, 0x75,
-    ]); // close_channel discriminator
+    const closeData = Buffer.from(DISCRIMINATORS.closeChannel, "hex");
 
     const closeIx = new TransactionInstruction({
       programId: PROGRAM_ID,

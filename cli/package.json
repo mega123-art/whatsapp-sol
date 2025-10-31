@@ -4,7 +4,7 @@
   "description": "Solana File Inscription CLI Tool",
   "main": "dist/index.js",
   "bin": {
-    "sol-inscribe": "./dist/index.js"
+    "sol-msg": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
