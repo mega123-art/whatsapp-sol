@@ -1,3 +1,4 @@
+bash```
 # 1. Initialize a Direct Message Thread
 $ sol-msg init-thread -r G9hQf4dF23... -c devnet
 # Output will give the Thread PDA: <THREAD_PDA>
@@ -20,3 +21,4 @@ $ sol-msg send-broadcast -ch <CHANNEL_PDA> -m "New project launch imminent." -k 
 
 # 7. Read Broadcasts
 $ sol-msg read-broadcasts -ch <CHANNEL_PDA> -k channelkey
+```
