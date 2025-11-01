@@ -5,17 +5,21 @@ A decentralized, encrypted messaging system built on Solana for direct peer-to-p
 ## Installation
 
 ```bash
-npm install -g sol-msg
-```
-
-Or build from source:
-```bash
+# Clone the repository
 git clone <repository>
 cd cli
+
+# Install dependencies
 npm install
+
+# Build the CLI
 npm run build
+
+# Link for global use
 npm link
 ```
+
+Now you can use `sol-msg` from anywhere in your terminal.
 
 ## Quick Start
 
