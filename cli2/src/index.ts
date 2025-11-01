@@ -14,21 +14,16 @@ import * as crypto from "crypto";
 import * as os from "os";
 import * as path from "path";
 
-// Using require for Chalk and Ora since they are common JS modules
 const chalk = require("chalk");
 const ora = require("ora");
 
-// Program ID - MUST match the ID in your Anchor program
 const PROGRAM_ID = new PublicKey(
   "9tN5NBvynubfJwQWDqrSoHEE3Xy2MVj3BmHdLu13wCcS"
 );
 
-// ============================================================================
-// Instruction Discriminators (Sighashes)
-// --- CORRECTED VALUES from the provided IDL ---
-// ============================================================================
+
 const DISCRIMINATORS = {
-  // Instruction Discriminator (Hex)
+  
   initializeThread: "cf4e5bb957f48e0b", // [207, 78, 91, 185, 87, 244, 142, 11]
   sendMessage: "392822b2bd0a411a", // [57, 40, 34, 178, 189, 10, 65, 26]
   initializeChannel: "e85bb1d47a5ee3fa", // [232, 91, 177, 212, 122, 94, 227, 250]
@@ -38,14 +33,8 @@ const DISCRIMINATORS = {
   closeChannel: "006824014200679d", // [0, 104, 36, 1, 66, 0, 103, 157]
 };
 
-// ============================================================================
-// Utility Functions
-// ============================================================================
 
-/**
- * Loads the user's Solana wallet keypair.
- * @param walletPath Optional path to the keypair file. Defaults to ~/.config/solana/id.json.
- */
+
 function loadWallet(walletPath?: string): Keypair {
   const walletFile =
     walletPath || path.join(os.homedir(), ".config", "solana", "idother.json");
@@ -58,9 +47,7 @@ function loadWallet(walletPath?: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
 
-/**
- * Creates a Connection object for the specified cluster.
- */
+
 function createConnection(cluster: string): Connection {
   let url: string;
   switch (cluster.toLowerCase()) {
@@ -84,9 +71,7 @@ function createConnection(cluster: string): Connection {
   return new Connection(url, "confirmed");
 }
 
-/**
- * Derives the Program Derived Address for a MessageThread.
- */
+
 function deriveThreadPDA(
   participantA: PublicKey,
   participantB: PublicKey,
@@ -103,9 +88,7 @@ function deriveThreadPDA(
   );
 }
 
-/**
- * Derives the Program Derived Address for a BroadcastChannel.
- */
+
 function deriveChannelPDA(
   owner: PublicKey,
   channelName: string
@@ -120,9 +103,7 @@ function deriveChannelPDA(
   );
 }
 
-/**
- * Derives the Program Derived Address for a ChannelSubscription.
- */
+
 function deriveSubscriptionPDA(
   channel: PublicKey,
   subscriber: PublicKey
@@ -133,9 +114,7 @@ function deriveSubscriptionPDA(
   );
 }
 
-/**
- * Simple AES-256-CBC encryption for demo purposes.
- */
+
 function encryptMessage(message: string, sharedSecret: string): Buffer {
   const cipher = crypto.createCipheriv(
     "aes-256-cbc",
@@ -145,9 +124,7 @@ function encryptMessage(message: string, sharedSecret: string): Buffer {
   return Buffer.concat([cipher.update(message, "utf8"), cipher.final()]);
 }
 
-/**
- * Simple AES-256-CBC decryption for demo purposes.
- */
+
 function decryptMessage(encrypted: Buffer, sharedSecret: string): string {
   const decipher = crypto.createDecipheriv(
     "aes-256-cbc",
@@ -159,13 +136,7 @@ function decryptMessage(encrypted: Buffer, sharedSecret: string): string {
   );
 }
 
-// ============================================================================
-// Commands
-// ============================================================================
 
-/**
- * Initialize a new message thread between two participants.
- */
 async function initThreadCommand(options: any) {
   console.log(chalk.bold.cyan("\n💬 Initialize Message Thread\n"));
   const spinner = ora();
@@ -221,9 +192,7 @@ async function initThreadCommand(options: any) {
   }
 }
 
-/**
- * Send a message in a message thread.
- */
+
 async function sendMessageCommand(options: any) {
   console.log(chalk.bold.cyan("\n📤 Send Message\n"));
   const spinner = ora();
@@ -235,25 +204,21 @@ async function sendMessageCommand(options: any) {
     spinner.succeed(chalk.green(`Connected to ${options.cluster}`));
     console.log(chalk.gray(`  Thread: ${threadPDA.toBase58()}\n`));
 
-    // Get thread info to determine next message index
     spinner.start("Fetching thread information...");
     const accountInfo = await connection.getAccountInfo(threadPDA);
     if (!accountInfo) {
       throw new Error("Thread not found. Invalid PDA or thread doesn't exist.");
     }
-    // message_count offset for MessageThread: 8 (disc) + 32 + 32 + 32 = 104
     const messageCount = accountInfo.data.readUInt32LE(104);
     spinner.succeed(chalk.green(`Thread found`));
     console.log(chalk.gray(`  Current messages: ${messageCount}\n`));
 
-    // Encrypt message
     spinner.start("Encrypting message...");
     const sharedSecret = options.key || "default-secret-key";
     const encrypted = encryptMessage(options.message, sharedSecret);
     spinner.succeed(chalk.green(`Message encrypted`));
     console.log(chalk.gray(`  Size: ${encrypted.length} bytes\n`));
 
-    // Send message
     spinner.start("Sending message...");
     const messageData = Buffer.concat([
       // Use the hex discriminator for clarity and verification
@@ -285,9 +250,6 @@ async function sendMessageCommand(options: any) {
   }
 }
 
-/**
- * Read and decrypt messages from a thread's transaction history.
- */
 async function readMessagesCommand(options: any) {
   console.log(chalk.bold.cyan("\n📖 Read Messages (Direct Thread)\n"));
   const spinner = ora();
@@ -298,7 +260,6 @@ async function readMessagesCommand(options: any) {
     spinner.succeed(chalk.green(`Connected to ${options.cluster}`));
     console.log(chalk.gray(`  Thread: ${threadPDA.toBase58()}\n`));
 
-    // Fetch thread metadata
     spinner.start("Fetching thread metadata...");
     const accountInfo = await connection.getAccountInfo(threadPDA);
     if (!accountInfo) {
@@ -307,33 +268,27 @@ async function readMessagesCommand(options: any) {
     const data = accountInfo.data;
     const participantA = new PublicKey(data.slice(8, 40));
     const participantB = new PublicKey(data.slice(40, 72));
-    // message_count offset for MessageThread: 8 (disc) + 32 + 32 + 32 = 104
     const messageCount = data.readUInt32LE(104);
     spinner.succeed(chalk.green(`Thread metadata retrieved`));
     console.log(chalk.gray(`  Participant A: ${participantA.toBase58()}`));
     console.log(chalk.gray(`  Participant B: ${participantB.toBase58()}`));
     console.log(chalk.gray(`  Total messages: ${messageCount}\n`));
 
-    // Fetch transaction history
     spinner.start("Fetching transaction history...");
     const signatures = await connection.getSignaturesForAddress(threadPDA, {
       limit: 1000,
     });
     spinner.succeed(chalk.green(`Found ${signatures.length} transactions\n`));
 
-    // Extract messages
     spinner.start("Extracting messages...");
     const messages: any[] = [];
     const sharedSecret = options.key || "default-secret-key";
-
-    // send_message discriminator prefix for quick check
     const SEND_MESSAGE_DISCRIMINATOR = Buffer.from(
       DISCRIMINATORS.sendMessage,
       "hex"
     );
 
     for (const sigInfo of signatures) {
-      // NOTE: This can be slow for a thread with thousands of messages
       try {
         const tx = await connection.getTransaction(sigInfo.signature, {
           maxSupportedTransactionVersion: 0,
@@ -384,14 +339,12 @@ async function readMessagesCommand(options: any) {
           }
         }
       } catch (error) {
-        // Skip transactions that failed to fetch or parse
       }
     }
 
     messages.sort((a, b) => a.index - b.index);
     spinner.succeed(chalk.green(`Extracted ${messages.length} messages\n`));
 
-    // Display messages
     console.log(chalk.bold("Messages:\n"));
     for (const msg of messages) {
       const date = msg.timestamp
@@ -409,9 +362,7 @@ async function readMessagesCommand(options: any) {
   }
 }
 
-/**
- * Initialize a new broadcast channel.
- */
+
 async function createChannelCommand(options: any) {
   console.log(chalk.bold.cyan("\n📢 Create Broadcast Channel\n"));
   const spinner = ora();
@@ -458,9 +409,7 @@ async function createChannelCommand(options: any) {
   }
 }
 
-/**
- * Send a broadcast message to a channel.
- */
+
 async function sendBroadcastCommand(options: any) {
   console.log(chalk.bold.cyan("\n📡 Send Broadcast Message\n"));
   const spinner = ora();
@@ -704,9 +653,7 @@ async function readBroadcastsCommand(options: any) {
   }
 }
 
-/**
- * Close a message thread and refund rent.
- */
+
 async function closeThreadCommand(options: any) {
   console.log(chalk.bold.cyan("\n🗑️ Close Message Thread\n"));
   const spinner = ora();
@@ -751,9 +698,7 @@ async function closeThreadCommand(options: any) {
   }
 }
 
-/**
- * Close a broadcast channel and refund rent.
- */
+
 async function closeChannelCommand(options: any) {
   console.log(chalk.bold.cyan("\n🗑️ Close Broadcast Channel\n"));
   const spinner = ora();
