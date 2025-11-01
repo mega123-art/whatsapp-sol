@@ -40,15 +40,10 @@ const fs = __importStar(require("fs"));
 const crypto = __importStar(require("crypto"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-// Using require for Chalk and Ora since they are common JS modules
 const chalk = require("chalk");
 const ora = require("ora");
-// Program ID - MUST match the ID in your Anchor program
 const PROGRAM_ID = new web3_js_1.PublicKey("9tN5NBvynubfJwQWDqrSoHEE3Xy2MVj3BmHdLu13wCcS");
-// ============================================================================
-// Instruction Discriminators (Sighashes)
-// --- CORRECTED VALUES from the provided IDL ---
-// ============================================================================
+
 const DISCRIMINATORS = {
     // Instruction Discriminator (Hex)
     initializeThread: "cf4e5bb957f48e0b", // [207, 78, 91, 185, 87, 244, 142, 11]
@@ -59,13 +54,7 @@ const DISCRIMINATORS = {
     closeThread: "35e71031f7656d0b", // [53, 231, 16, 49, 247, 101, 109, 11]
     closeChannel: "006824014200679d", // [0, 104, 36, 1, 66, 0, 103, 157]
 };
-// ============================================================================
-// Utility Functions
-// ============================================================================
-/**
- * Loads the user's Solana wallet keypair.
- * @param walletPath Optional path to the keypair file. Defaults to ~/.config/solana/id.json.
- */
+
 function loadWallet(walletPath) {
     const walletFile = walletPath || path.join(os.homedir(), ".config", "solana", "id.json");
     if (!fs.existsSync(walletFile)) {
@@ -74,9 +63,7 @@ function loadWallet(walletPath) {
     const secretKey = JSON.parse(fs.readFileSync(walletFile, "utf-8"));
     return web3_js_1.Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
-/**
- * Creates a Connection object for the specified cluster.
- */
+
 function createConnection(cluster) {
     let url;
     switch (cluster.toLowerCase()) {
@@ -99,9 +86,7 @@ function createConnection(cluster) {
     }
     return new web3_js_1.Connection(url, "confirmed");
 }
-/**
- * Derives the Program Derived Address for a MessageThread.
- */
+
 function deriveThreadPDA(participantA, participantB, threadId) {
     return web3_js_1.PublicKey.findProgramAddressSync([
         Buffer.from("message_thread"),
@@ -110,9 +95,7 @@ function deriveThreadPDA(participantA, participantB, threadId) {
         threadId,
     ], PROGRAM_ID);
 }
-/**
- * Derives the Program Derived Address for a BroadcastChannel.
- */
+
 function deriveChannelPDA(owner, channelName) {
     return web3_js_1.PublicKey.findProgramAddressSync([
         Buffer.from("broadcast_channel"),
@@ -120,22 +103,16 @@ function deriveChannelPDA(owner, channelName) {
         Buffer.from(channelName),
     ], PROGRAM_ID);
 }
-/**
- * Derives the Program Derived Address for a ChannelSubscription.
- */
+
 function deriveSubscriptionPDA(channel, subscriber) {
     return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("subscription"), channel.toBuffer(), subscriber.toBuffer()], PROGRAM_ID);
 }
-/**
- * Simple AES-256-CBC encryption for demo purposes.
- */
+
 function encryptMessage(message, sharedSecret) {
     const cipher = crypto.createCipheriv("aes-256-cbc", crypto.scryptSync(sharedSecret, "salt", 32), Buffer.alloc(16, 0));
     return Buffer.concat([cipher.update(message, "utf8"), cipher.final()]);
 }
-/**
- * Simple AES-256-CBC decryption for demo purposes.
- */
+
 function decryptMessage(encrypted, sharedSecret) {
     const decipher = crypto.createDecipheriv("aes-256-cbc", crypto.scryptSync(sharedSecret, "salt", 32), Buffer.alloc(16, 0));
     try {
@@ -148,9 +125,7 @@ function decryptMessage(encrypted, sharedSecret) {
         throw new Error("Decryption failed. Incorrect key or corrupt data.");
     }
 }
-/**
- * Fetches and parses common metadata for a MessageThread or BroadcastChannel.
- */
+
 async function _fetchAccountData(connection, pda, type) {
     const accountInfo = await connection.getAccountInfo(pda);
     if (!accountInfo) {
@@ -159,27 +134,21 @@ async function _fetchAccountData(connection, pda, type) {
     const data = accountInfo.data;
     const metadata = { type, pda };
     if (type === "thread") {
-        // MessageThread: 8 (disc) + 32 (A) + 32 (B) + 32 (ID) + 4 (count) = 108. Count is at 104.
         metadata.messageCountOffset = 104;
         metadata.discriminator = Buffer.from(DISCRIMINATORS.sendMessage, "hex");
         metadata.participantA = new web3_js_1.PublicKey(data.slice(8, 40));
         metadata.participantB = new web3_js_1.PublicKey(data.slice(40, 72));
     }
     else {
-        // channel
-        // BroadcastChannel: 8 (disc) + 32 (owner) + 4 (name len) + N (name) + 4 (count). Count is at 76 (assuming max 32 bytes for name)
         metadata.messageCountOffset = 76;
         metadata.discriminator = Buffer.from(DISCRIMINATORS.sendBroadcast, "hex");
         metadata.owner = new web3_js_1.PublicKey(data.slice(8, 40));
         const channelNameLen = data.readUInt32LE(40);
         metadata.channelName = data.slice(44, 44 + channelNameLen).toString("utf8");
     }
-    // Explicitly cast to AccountMetadata, assuming the type check above guarantees all fields are set
     return { info: metadata, data };
 }
-/**
- * Fetches and decrypts messages/broadcasts that have an index >= startingIndex.
- */
+
 async function _fetchNewMessages(connection, metadata, sharedSecret, startingIndex = 0) {
     const signatures = await connection.getSignaturesForAddress(metadata.pda, {
         limit: 1000,

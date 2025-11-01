@@ -40,15 +40,10 @@ const fs = __importStar(require("fs"));
 const crypto = __importStar(require("crypto"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
-// Using require for Chalk and Ora since they are common JS modules
 const chalk = require("chalk");
 const ora = require("ora");
-// Program ID - MUST match the ID in your Anchor program
 const PROGRAM_ID = new web3_js_1.PublicKey("9tN5NBvynubfJwQWDqrSoHEE3Xy2MVj3BmHdLu13wCcS");
-// ============================================================================
-// Instruction Discriminators (Sighashes)
-// --- CORRECTED VALUES from the provided IDL ---
-// ============================================================================
+
 const DISCRIMINATORS = {
     // Instruction Discriminator (Hex)
     initializeThread: "cf4e5bb957f48e0b", // [207, 78, 91, 185, 87, 244, 142, 11]
@@ -59,13 +54,7 @@ const DISCRIMINATORS = {
     closeThread: "35e71031f7656d0b", // [53, 231, 16, 49, 247, 101, 109, 11]
     closeChannel: "006824014200679d", // [0, 104, 36, 1, 66, 0, 103, 157]
 };
-// ============================================================================
-// Utility Functions
-// ============================================================================
-/**
- * Loads the user's Solana wallet keypair.
- * @param walletPath Optional path to the keypair file. Defaults to ~/.config/solana/id.json.
- */
+
 function loadWallet(walletPath) {
     const walletFile = walletPath || path.join(os.homedir(), ".config", "solana", "idother.json");
     if (!fs.existsSync(walletFile)) {
@@ -74,9 +63,7 @@ function loadWallet(walletPath) {
     const secretKey = JSON.parse(fs.readFileSync(walletFile, "utf-8"));
     return web3_js_1.Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
-/**
- * Creates a Connection object for the specified cluster.
- */
+
 function createConnection(cluster) {
     let url;
     switch (cluster.toLowerCase()) {
@@ -99,9 +86,7 @@ function createConnection(cluster) {
     }
     return new web3_js_1.Connection(url, "confirmed");
 }
-/**
- * Derives the Program Derived Address for a MessageThread.
- */
+
 function deriveThreadPDA(participantA, participantB, threadId) {
     return web3_js_1.PublicKey.findProgramAddressSync([
         Buffer.from("message_thread"),
@@ -110,9 +95,7 @@ function deriveThreadPDA(participantA, participantB, threadId) {
         threadId,
     ], PROGRAM_ID);
 }
-/**
- * Derives the Program Derived Address for a BroadcastChannel.
- */
+
 function deriveChannelPDA(owner, channelName) {
     return web3_js_1.PublicKey.findProgramAddressSync([
         Buffer.from("broadcast_channel"),
@@ -120,32 +103,21 @@ function deriveChannelPDA(owner, channelName) {
         Buffer.from(channelName),
     ], PROGRAM_ID);
 }
-/**
- * Derives the Program Derived Address for a ChannelSubscription.
- */
+
 function deriveSubscriptionPDA(channel, subscriber) {
     return web3_js_1.PublicKey.findProgramAddressSync([Buffer.from("subscription"), channel.toBuffer(), subscriber.toBuffer()], PROGRAM_ID);
 }
-/**
- * Simple AES-256-CBC encryption for demo purposes.
- */
+
 function encryptMessage(message, sharedSecret) {
     const cipher = crypto.createCipheriv("aes-256-cbc", crypto.scryptSync(sharedSecret, "salt", 32), Buffer.alloc(16, 0));
     return Buffer.concat([cipher.update(message, "utf8"), cipher.final()]);
 }
-/**
- * Simple AES-256-CBC decryption for demo purposes.
- */
+
 function decryptMessage(encrypted, sharedSecret) {
     const decipher = crypto.createDecipheriv("aes-256-cbc", crypto.scryptSync(sharedSecret, "salt", 32), Buffer.alloc(16, 0));
     return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }
-// ============================================================================
-// Commands
-// ============================================================================
-/**
- * Initialize a new message thread between two participants.
- */
+
 async function initThreadCommand(options) {
     console.log(chalk.bold.cyan("\n💬 Initialize Message Thread\n"));
     const spinner = ora();
