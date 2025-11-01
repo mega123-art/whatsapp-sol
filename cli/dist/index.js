@@ -849,14 +849,14 @@ program.on("--help", () => {
     console.log("  $ sol-msg init-thread -r <recipient_pubkey> -c devnet");
     console.log('  $ sol-msg send -t <thread_pda> -m "Hello!" -k mykey -c devnet');
     console.log("  $ sol-msg read -t <thread_pda> -k mykey -c devnet");
-    console.log(chalk.green("  $ sol-msg listen -t <thread_pda> -k mykey -c devnet (New!)"));
+    console.log(console.log("  $ sol-msg listen -t <thread_pda> -k mykey -c devnet"));
     console.log("  $ sol-msg close-thread -t <thread_pda>");
     console.log(chalk.yellow("\n  --- Broadcast Channels ---"));
     console.log('  $ sol-msg create-channel -n "Announcements"');
     console.log("  $ sol-msg subscribe -ch <channel_pda>");
     console.log('  $ sol-msg send-broadcast -ch <channel_pda> -m "New Update" -k channelkey');
     console.log("  $ sol-msg read-broadcasts -ch <channel_pda> -k channelkey");
-    console.log(chalk.green("  $ sol-msg listen -ch <channel_pda> -k channelkey -c devnet (New!)"));
+    console.log(console.log("  $ sol-msg listen -ch <channel_pda> -k channelkey -c devnet"));
     console.log("  $ sol-msg close-channel -ch <channel_pda>");
     console.log("");
 });
