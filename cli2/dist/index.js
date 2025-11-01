@@ -67,7 +67,7 @@ const DISCRIMINATORS = {
  * @param walletPath Optional path to the keypair file. Defaults to ~/.config/solana/id.json.
  */
 function loadWallet(walletPath) {
-    const walletFile = walletPath || path.join(os.homedir(), ".config", "solana", "id.json");
+    const walletFile = walletPath || path.join(os.homedir(), ".config", "solana", "idother.json");
     if (!fs.existsSync(walletFile)) {
         throw new Error(`Wallet file not found at ${walletFile}. Please specify --wallet path.`);
     }
@@ -138,102 +138,7 @@ function encryptMessage(message, sharedSecret) {
  */
 function decryptMessage(encrypted, sharedSecret) {
     const decipher = crypto.createDecipheriv("aes-256-cbc", crypto.scryptSync(sharedSecret, "salt", 32), Buffer.alloc(16, 0));
-    try {
-        return Buffer.concat([
-            decipher.update(encrypted),
-            decipher.final(),
-        ]).toString("utf8");
-    }
-    catch (e) {
-        throw new Error("Decryption failed. Incorrect key or corrupt data.");
-    }
-}
-/**
- * Fetches and parses common metadata for a MessageThread or BroadcastChannel.
- */
-async function _fetchAccountData(connection, pda, type) {
-    const accountInfo = await connection.getAccountInfo(pda);
-    if (!accountInfo) {
-        throw new Error(`${type === "thread" ? "Thread" : "Channel"} not found. Invalid PDA or account doesn't exist.`);
-    }
-    const data = accountInfo.data;
-    const metadata = { type, pda };
-    if (type === "thread") {
-        // MessageThread: 8 (disc) + 32 (A) + 32 (B) + 32 (ID) + 4 (count) = 108. Count is at 104.
-        metadata.messageCountOffset = 104;
-        metadata.discriminator = Buffer.from(DISCRIMINATORS.sendMessage, "hex");
-        metadata.participantA = new web3_js_1.PublicKey(data.slice(8, 40));
-        metadata.participantB = new web3_js_1.PublicKey(data.slice(40, 72));
-    }
-    else {
-        // channel
-        // BroadcastChannel: 8 (disc) + 32 (owner) + 4 (name len) + N (name) + 4 (count). Count is at 76 (assuming max 32 bytes for name)
-        metadata.messageCountOffset = 76;
-        metadata.discriminator = Buffer.from(DISCRIMINATORS.sendBroadcast, "hex");
-        metadata.owner = new web3_js_1.PublicKey(data.slice(8, 40));
-        const channelNameLen = data.readUInt32LE(40);
-        metadata.channelName = data.slice(44, 44 + channelNameLen).toString("utf8");
-    }
-    // Explicitly cast to AccountMetadata, assuming the type check above guarantees all fields are set
-    return { info: metadata, data };
-}
-/**
- * Fetches and decrypts messages/broadcasts that have an index >= startingIndex.
- */
-async function _fetchNewMessages(connection, metadata, sharedSecret, startingIndex = 0) {
-    const signatures = await connection.getSignaturesForAddress(metadata.pda, {
-        limit: 1000,
-    });
-    const messages = [];
-    const DISCRIMINATOR = metadata.discriminator;
-    for (const sigInfo of signatures) {
-        try {
-            const tx = await connection.getTransaction(sigInfo.signature, {
-                maxSupportedTransactionVersion: 0,
-            });
-            if (!tx || !tx.transaction)
-                continue;
-            const message = tx.transaction.message;
-            if ("compiledInstructions" in message) {
-                for (const ix of message.compiledInstructions) {
-                    const programId = message.staticAccountKeys[ix.programIdIndex];
-                    if (programId.equals(PROGRAM_ID)) {
-                        const ixData = Buffer.from(ix.data);
-                        // Check for discriminator
-                        if (ixData.length > 8 &&
-                            ixData.subarray(0, 8).equals(DISCRIMINATOR)) {
-                            const messageIndex = ixData.readUInt32LE(8); // u32
-                            const contentLength = ixData.readUInt32LE(12); // u32
-                            const encrypted = ixData.slice(16, 16 + contentLength);
-                            // Only process messages that are new
-                            if (messageIndex >= startingIndex) {
-                                try {
-                                    const decrypted = decryptMessage(encrypted, sharedSecret);
-                                    // Sender is key 1 in the instruction's account list
-                                    const sender = message.staticAccountKeys[ix.accountKeyIndexes[1]];
-                                    messages.push({
-                                        index: messageIndex,
-                                        sender: sender.toBase58(),
-                                        content: decrypted,
-                                        timestamp: tx.blockTime,
-                                        signature: sigInfo.signature,
-                                    });
-                                }
-                                catch (e) {
-                                    // Failed to decrypt message - skip and log if running a command that logs errors
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch (error) {
-            // Skip transactions that failed to fetch or parse
-        }
-    }
-    messages.sort((a, b) => a.index - b.index);
-    return messages;
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }
 // ============================================================================
 // Commands
@@ -304,8 +209,12 @@ async function sendMessageCommand(options) {
         console.log(chalk.gray(`  Thread: ${threadPDA.toBase58()}\n`));
         // Get thread info to determine next message index
         spinner.start("Fetching thread information...");
-        const { info: metadata, data: accountData } = await _fetchAccountData(connection, threadPDA, "thread");
-        const messageCount = accountData.readUInt32LE(metadata.messageCountOffset);
+        const accountInfo = await connection.getAccountInfo(threadPDA);
+        if (!accountInfo) {
+            throw new Error("Thread not found. Invalid PDA or thread doesn't exist.");
+        }
+        // message_count offset for MessageThread: 8 (disc) + 32 + 32 + 32 = 104
+        const messageCount = accountInfo.data.readUInt32LE(104);
         spinner.succeed(chalk.green(`Thread found`));
         console.log(chalk.gray(`  Current messages: ${messageCount}\n`));
         // Encrypt message
@@ -356,17 +265,80 @@ async function readMessagesCommand(options) {
         spinner.start("Connecting to Solana...");
         const connection = createConnection(options.cluster);
         const threadPDA = new web3_js_1.PublicKey(options.thread);
-        const sharedSecret = options.key || "default-secret-key";
         spinner.succeed(chalk.green(`Connected to ${options.cluster}`));
         console.log(chalk.gray(`  Thread: ${threadPDA.toBase58()}\n`));
-        spinner.start("Fetching thread metadata and messages...");
-        const { info: metadata, data: accountData } = await _fetchAccountData(connection, threadPDA, "thread");
-        const messageCount = accountData.readUInt32LE(metadata.messageCountOffset);
-        const messages = await _fetchNewMessages(connection, metadata, sharedSecret, 0);
+        // Fetch thread metadata
+        spinner.start("Fetching thread metadata...");
+        const accountInfo = await connection.getAccountInfo(threadPDA);
+        if (!accountInfo) {
+            throw new Error("Thread not found.");
+        }
+        const data = accountInfo.data;
+        const participantA = new web3_js_1.PublicKey(data.slice(8, 40));
+        const participantB = new web3_js_1.PublicKey(data.slice(40, 72));
+        // message_count offset for MessageThread: 8 (disc) + 32 + 32 + 32 = 104
+        const messageCount = data.readUInt32LE(104);
         spinner.succeed(chalk.green(`Thread metadata retrieved`));
-        console.log(chalk.gray(`  Participant A: ${metadata.participantA.toBase58()}`));
-        console.log(chalk.gray(`  Participant B: ${metadata.participantB.toBase58()}`));
-        console.log(chalk.gray(`  Total messages: ${messageCount}`));
+        console.log(chalk.gray(`  Participant A: ${participantA.toBase58()}`));
+        console.log(chalk.gray(`  Participant B: ${participantB.toBase58()}`));
+        console.log(chalk.gray(`  Total messages: ${messageCount}\n`));
+        // Fetch transaction history
+        spinner.start("Fetching transaction history...");
+        const signatures = await connection.getSignaturesForAddress(threadPDA, {
+            limit: 1000,
+        });
+        spinner.succeed(chalk.green(`Found ${signatures.length} transactions\n`));
+        // Extract messages
+        spinner.start("Extracting messages...");
+        const messages = [];
+        const sharedSecret = options.key || "default-secret-key";
+        // send_message discriminator prefix for quick check
+        const SEND_MESSAGE_DISCRIMINATOR = Buffer.from(DISCRIMINATORS.sendMessage, "hex");
+        for (const sigInfo of signatures) {
+            // NOTE: This can be slow for a thread with thousands of messages
+            try {
+                const tx = await connection.getTransaction(sigInfo.signature, {
+                    maxSupportedTransactionVersion: 0,
+                });
+                if (!tx || !tx.transaction)
+                    continue;
+                const message = tx.transaction.message;
+                if ("compiledInstructions" in message) {
+                    for (const ix of message.compiledInstructions) {
+                        const programId = message.staticAccountKeys[ix.programIdIndex];
+                        if (programId.equals(PROGRAM_ID)) {
+                            const ixData = Buffer.from(ix.data);
+                            // Check for send_message discriminator
+                            if (ixData.length > 8 &&
+                                ixData.subarray(0, 8).equals(SEND_MESSAGE_DISCRIMINATOR)) {
+                                const messageIndex = ixData.readUInt32LE(8); // u32
+                                const contentLength = ixData.readUInt32LE(12); // u32
+                                const encrypted = ixData.slice(16, 16 + contentLength);
+                                try {
+                                    const decrypted = decryptMessage(encrypted, sharedSecret);
+                                    // Sender is key 1 in the instruction's account list
+                                    // 0: threadPDA, 1: sender
+                                    const sender = message.staticAccountKeys[ix.accountKeyIndexes[1]];
+                                    messages.push({
+                                        index: messageIndex,
+                                        sender: sender.toBase58(),
+                                        content: decrypted,
+                                        timestamp: tx.blockTime,
+                                    });
+                                }
+                                catch (e) {
+                                    console.log(chalk.yellow(`  ⚠️  Failed to decrypt message ${messageIndex} (${sigInfo.signature.substring(0, 4)}...)`));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (error) {
+                // Skip transactions that failed to fetch or parse
+            }
+        }
+        messages.sort((a, b) => a.index - b.index);
         spinner.succeed(chalk.green(`Extracted ${messages.length} messages\n`));
         // Display messages
         console.log(chalk.bold("Messages:\n"));
@@ -449,8 +421,12 @@ async function sendBroadcastCommand(options) {
         console.log(chalk.gray(`  Channel: ${channelPDA.toBase58()}\n`));
         // Get channel info to determine next message index
         spinner.start("Fetching channel information...");
-        const { info: metadata, data: accountData } = await _fetchAccountData(connection, channelPDA, "channel");
-        const messageCount = accountData.readUInt32LE(metadata.messageCountOffset);
+        const accountInfo = await connection.getAccountInfo(channelPDA);
+        if (!accountInfo) {
+            throw new Error("Channel not found. Invalid PDA or channel doesn't exist.");
+        }
+        // message_count offset for BroadcastChannel: 8 (disc) + 32 + 4 + 32 = 76 (Max name size)
+        const messageCount = accountInfo.data.readUInt32LE(76);
         spinner.succeed(chalk.green(`Channel found`));
         console.log(chalk.gray(`  Current broadcasts: ${messageCount}\n`));
         // Encrypt message
@@ -545,18 +521,81 @@ async function readBroadcastsCommand(options) {
         spinner.start("Connecting to Solana...");
         const connection = createConnection(options.cluster);
         const channelPDA = new web3_js_1.PublicKey(options.channel);
-        const sharedSecret = options.key || "default-channel-key";
         spinner.succeed(chalk.green(`Connected to ${options.cluster}`));
         console.log(chalk.gray(`  Channel: ${channelPDA.toBase58()}\n`));
         // Fetch channel metadata
-        spinner.start("Fetching channel metadata and messages...");
-        const { info: metadata, data: accountData } = await _fetchAccountData(connection, channelPDA, "channel");
-        const messageCount = accountData.readUInt32LE(metadata.messageCountOffset);
-        const messages = await _fetchNewMessages(connection, metadata, sharedSecret, 0);
+        spinner.start("Fetching channel metadata...");
+        const accountInfo = await connection.getAccountInfo(channelPDA);
+        if (!accountInfo) {
+            throw new Error("Channel not found.");
+        }
+        const channelData = accountInfo.data;
+        const owner = new web3_js_1.PublicKey(channelData.slice(8, 40));
+        const channelNameLen = channelData.readUInt32LE(40);
+        const channelName = channelData
+            .slice(44, 44 + channelNameLen)
+            .toString("utf8");
+        const messageCount = channelData.readUInt32LE(76);
         spinner.succeed(chalk.green(`Channel metadata retrieved`));
-        console.log(chalk.gray(`  Owner: ${metadata.owner.toBase58()}`));
-        console.log(chalk.gray(`  Channel Name: ${metadata.channelName}`));
-        console.log(chalk.gray(`  Total broadcasts: ${messageCount}`));
+        console.log(chalk.gray(`  Owner: ${owner.toBase58()}`));
+        console.log(chalk.gray(`  Channel Name: ${channelName}`));
+        console.log(chalk.gray(`  Total broadcasts: ${messageCount}\n`));
+        // Fetch transaction history
+        spinner.start("Fetching transaction history...");
+        const signatures = await connection.getSignaturesForAddress(channelPDA, {
+            limit: 1000,
+        });
+        spinner.succeed(chalk.green(`Found ${signatures.length} transactions\n`));
+        // Extract messages
+        spinner.start("Extracting messages...");
+        const messages = [];
+        const sharedSecret = options.key || "default-channel-key";
+        // send_broadcast discriminator prefix
+        const SEND_BROADCAST_DISCRIMINATOR = Buffer.from(DISCRIMINATORS.sendBroadcast, "hex");
+        for (const sigInfo of signatures) {
+            try {
+                const tx = await connection.getTransaction(sigInfo.signature, {
+                    maxSupportedTransactionVersion: 0,
+                });
+                if (!tx || !tx.transaction)
+                    continue;
+                const message = tx.transaction.message;
+                if ("compiledInstructions" in message) {
+                    for (const ix of message.compiledInstructions) {
+                        const programId = message.staticAccountKeys[ix.programIdIndex];
+                        if (programId.equals(PROGRAM_ID)) {
+                            const ixData = Buffer.from(ix.data);
+                            // Check for send_broadcast discriminator
+                            if (ixData.length > 8 &&
+                                ixData.subarray(0, 8).equals(SEND_BROADCAST_DISCRIMINATOR)) {
+                                const messageIndex = ixData.readUInt32LE(8); // u32
+                                const contentLength = ixData.readUInt32LE(12); // u32
+                                const encrypted = ixData.slice(16, 16 + contentLength);
+                                try {
+                                    const decrypted = decryptMessage(encrypted, sharedSecret);
+                                    // Sender is key 1 in the instruction's account list
+                                    // 0: channelPDA, 1: sender (owner)
+                                    const sender = message.staticAccountKeys[ix.accountKeyIndexes[1]];
+                                    messages.push({
+                                        index: messageIndex,
+                                        sender: sender.toBase58(),
+                                        content: decrypted,
+                                        timestamp: tx.blockTime,
+                                    });
+                                }
+                                catch (e) {
+                                    console.log(chalk.yellow(`  ⚠️  Failed to decrypt broadcast ${messageIndex} (${sigInfo.signature.substring(0, 4)}...)`));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (error) {
+                // Skip transactions that failed to fetch or parse
+            }
+        }
+        messages.sort((a, b) => a.index - b.index);
         spinner.succeed(chalk.green(`Extracted ${messages.length} broadcasts\n`));
         // Display messages
         console.log(chalk.bold("Broadcasts:\n"));
@@ -660,82 +699,6 @@ async function closeChannelCommand(options) {
         process.exit(1);
     }
 }
-/**
- * Monitors a PDA for changes and displays the new message content instantly.
- */
-async function monitorPdaUpdates(options) {
-    const accountAddress = options.thread || options.channel;
-    const isThread = !!options.thread;
-    if (!accountAddress) {
-        console.error(chalk.red("\n❌ Error: Must provide a --thread or --channel address."));
-        process.exit(1);
-    }
-    if (!options.key) {
-        console.warn(chalk.yellow(`\n⚠️ Warning: No encryption key (--key) provided. Messages will not be decrypted/displayed automatically.\n`));
-    }
-    const targetPDA = new web3_js_1.PublicKey(accountAddress);
-    const sharedSecret = options.key || "default-secret-key";
-    console.log(chalk.bold.cyan(isThread
-        ? "\n👂 Listening for Thread Updates..."
-        : "\n👂 Listening for Channel Broadcasts..."));
-    console.log(chalk.gray(`  Target PDA: ${targetPDA.toBase58()}`));
-    console.log(chalk.gray(`  Cluster: ${options.cluster}`));
-    console.log(chalk.gray(`  Decryption Key: ${options.key ? "Provided" : "Using default"}\n`));
-    const connection = createConnection(options.cluster);
-    let initialCount = 0;
-    try {
-        // 1. Fetch initial state to get the current count and metadata
-        const { info: metadata, data: accountData } = await _fetchAccountData(connection, targetPDA, isThread ? "thread" : "channel");
-        initialCount = accountData.readUInt32LE(metadata.messageCountOffset);
-        console.log(chalk.green(`Initial message/broadcast count: ${initialCount}\n`));
-        // 2. Set up the WebSocket subscription
-        const subscriptionId = connection.onAccountChange(targetPDA, async (updatedAccountInfo, context) => {
-            const updatedData = updatedAccountInfo.data;
-            const newCount = updatedData.readUInt32LE(metadata.messageCountOffset);
-            if (newCount > initialCount) {
-                const timestamp = new Date().toLocaleTimeString();
-                console.log(chalk.yellow("=================================================="));
-                console.log(chalk.green.bold(`\n🎉 New ${isThread ? "Message" : "Broadcast"} Received at ${timestamp}! (Slot: ${context.slot})`));
-                try {
-                    // Fetch and decrypt only the new message(s) by starting from the initial count
-                    const newMessages = await _fetchNewMessages(connection, metadata, sharedSecret, initialCount);
-                    if (newMessages.length > 0) {
-                        const latestMessage = newMessages[newMessages.length - 1];
-                        const msgType = isThread ? "Message" : "Broadcast";
-                        console.log(chalk.cyan(`[${latestMessage.index}] ${msgType} Content:`));
-                        console.log(chalk.gray(`From: ${latestMessage.sender}`));
-                        console.log(chalk.white(`${latestMessage.content}\n`));
-                    }
-                    else {
-                        console.log(chalk.yellow(`Could not find or decrypt new content. Run the 'sol-msg ${isThread ? "read" : "read-broadcasts"}' command for a full log (Old Count: ${initialCount} -> New Count: ${newCount}).`));
-                    }
-                }
-                catch (e) {
-                    console.error(chalk.red(`\n❌ Decryption/Fetch Error: ${e.message}`));
-                    console.log(chalk.yellow(`Run the 'sol-msg ${isThread ? "read" : "read-broadcasts"}' command for a full log.`));
-                }
-                console.log(chalk.yellow("==================================================\n"));
-                initialCount = newCount; // Update the count for the next message
-            }
-        }, "confirmed" // Commitment level
-        );
-        console.log(chalk.cyan(`Listening started. Subscription ID: ${subscriptionId}`));
-        console.log(chalk.gray("Press Ctrl+C to stop listening...\n"));
-        // Keep the process alive
-        process.stdin.resume();
-        // Cleanup on exit
-        process.on("SIGINT", async () => {
-            console.log(chalk.yellow("\nStopping subscription..."));
-            await connection.removeAccountChangeListener(subscriptionId);
-            console.log(chalk.yellow("Subscription removed. Exiting."));
-            process.exit(0);
-        });
-    }
-    catch (error) {
-        console.error(chalk.red(`\n❌ Error setting up listener: ${error.message}`));
-        process.exit(1);
-    }
-}
 // ============================================================================
 // CLI Setup
 // ============================================================================
@@ -811,7 +774,7 @@ program
     .option("-w, --wallet <path>", "Path to wallet keypair file")
     .option("-c, --cluster <cluster>", "Solana cluster", "devnet")
     .action(sendBroadcastCommand);
-// Read broadcasts
+// Read broadcasts (NEW COMMAND)
 program
     .command("read-broadcasts")
     .description("Read messages broadcast on a channel")
@@ -829,17 +792,6 @@ program
     .option("-c, --cluster <cluster>", "Solana cluster", "devnet")
     .action(closeChannelCommand);
 // ------------------------------------
-// REAL-TIME LISTENER COMMAND (UPDATED)
-// ------------------------------------
-program
-    .command("listen")
-    .description("Listen for real-time updates on a thread or channel PDA")
-    .option("-t, --thread <address>", "Thread PDA address to listen to")
-    .option("-ch, --channel <address>", "Channel PDA address to listen to")
-    .option("-k, --key <secret>", "Decryption key (REQUIRED for instant content display)")
-    .option("-c, --cluster <cluster>", "Solana cluster", "devnet")
-    .action(monitorPdaUpdates);
-// ------------------------------------
 // HELP AND PARSE
 // ------------------------------------
 program.on("--help", () => {
@@ -849,14 +801,12 @@ program.on("--help", () => {
     console.log("  $ sol-msg init-thread -r <recipient_pubkey> -c devnet");
     console.log('  $ sol-msg send -t <thread_pda> -m "Hello!" -k mykey -c devnet');
     console.log("  $ sol-msg read -t <thread_pda> -k mykey -c devnet");
-    console.log(chalk.green("  $ sol-msg listen -t <thread_pda> -k mykey -c devnet (New!)"));
     console.log("  $ sol-msg close-thread -t <thread_pda>");
     console.log(chalk.yellow("\n  --- Broadcast Channels ---"));
     console.log('  $ sol-msg create-channel -n "Announcements"');
     console.log("  $ sol-msg subscribe -ch <channel_pda>");
     console.log('  $ sol-msg send-broadcast -ch <channel_pda> -m "New Update" -k channelkey');
     console.log("  $ sol-msg read-broadcasts -ch <channel_pda> -k channelkey");
-    console.log(chalk.green("  $ sol-msg listen -ch <channel_pda> -k channelkey -c devnet (New!)"));
     console.log("  $ sol-msg close-channel -ch <channel_pda>");
     console.log("");
 });
