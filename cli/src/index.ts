@@ -14,19 +14,15 @@ import * as crypto from "crypto";
 import * as os from "os";
 import * as path from "path";
 
-// Using require for Chalk and Ora since they are common JS modules
+
 const chalk = require("chalk");
 const ora = require("ora");
 
-// Program ID - MUST match the ID in your Anchor program
+
 const PROGRAM_ID = new PublicKey(
   "9tN5NBvynubfJwQWDqrSoHEE3Xy2MVj3BmHdLu13wCcS"
 );
 
-// ============================================================================
-// Instruction Discriminators (Sighashes)
-// --- CORRECTED VALUES from the provided IDL ---
-// ============================================================================
 const DISCRIMINATORS = {
   // Instruction Discriminator (Hex)
   initializeThread: "cf4e5bb957f48e0b", // [207, 78, 91, 185, 87, 244, 142, 11]
@@ -38,14 +34,7 @@ const DISCRIMINATORS = {
   closeChannel: "006824014200679d", // [0, 104, 36, 1, 66, 0, 103, 157]
 };
 
-// ============================================================================
-// Utility Functions
-// ============================================================================
 
-/**
- * Loads the user's Solana wallet keypair.
- * @param walletPath Optional path to the keypair file. Defaults to ~/.config/solana/id.json.
- */
 function loadWallet(walletPath?: string): Keypair {
   const walletFile =
     walletPath || path.join(os.homedir(), ".config", "solana", "id.json");
@@ -58,9 +47,7 @@ function loadWallet(walletPath?: string): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(secretKey));
 }
 
-/**
- * Creates a Connection object for the specified cluster.
- */
+
 function createConnection(cluster: string): Connection {
   let url: string;
   switch (cluster.toLowerCase()) {
@@ -84,9 +71,7 @@ function createConnection(cluster: string): Connection {
   return new Connection(url, "confirmed");
 }
 
-/**
- * Derives the Program Derived Address for a MessageThread.
- */
+
 function deriveThreadPDA(
   participantA: PublicKey,
   participantB: PublicKey,
@@ -103,9 +88,7 @@ function deriveThreadPDA(
   );
 }
 
-/**
- * Derives the Program Derived Address for a BroadcastChannel.
- */
+
 function deriveChannelPDA(
   owner: PublicKey,
   channelName: string
@@ -120,9 +103,7 @@ function deriveChannelPDA(
   );
 }
 
-/**
- * Derives the Program Derived Address for a ChannelSubscription.
- */
+
 function deriveSubscriptionPDA(
   channel: PublicKey,
   subscriber: PublicKey
@@ -133,9 +114,7 @@ function deriveSubscriptionPDA(
   );
 }
 
-/**
- * Simple AES-256-CBC encryption for demo purposes.
- */
+
 function encryptMessage(message: string, sharedSecret: string): Buffer {
   const cipher = crypto.createCipheriv(
     "aes-256-cbc",
@@ -145,9 +124,7 @@ function encryptMessage(message: string, sharedSecret: string): Buffer {
   return Buffer.concat([cipher.update(message, "utf8"), cipher.final()]);
 }
 
-/**
- * Simple AES-256-CBC decryption for demo purposes.
- */
+
 function decryptMessage(encrypted: Buffer, sharedSecret: string): string {
   const decipher = crypto.createDecipheriv(
     "aes-256-cbc",
@@ -164,9 +141,6 @@ function decryptMessage(encrypted: Buffer, sharedSecret: string): string {
   }
 }
 
-// ============================================================================
-// Internal Core Functions (Reusable by read/listen commands)
-// ============================================================================
 
 interface AccountMetadata {
   type: "thread" | "channel";
@@ -179,9 +153,7 @@ interface AccountMetadata {
   channelName?: string;
 }
 
-/**
- * Fetches and parses common metadata for a MessageThread or BroadcastChannel.
- */
+
 async function _fetchAccountData(
   connection: Connection,
   pda: PublicKey,
@@ -199,14 +171,11 @@ async function _fetchAccountData(
   const metadata: Partial<AccountMetadata> = { type, pda };
 
   if (type === "thread") {
-    // MessageThread: 8 (disc) + 32 (A) + 32 (B) + 32 (ID) + 4 (count) = 108. Count is at 104.
     metadata.messageCountOffset = 104;
     metadata.discriminator = Buffer.from(DISCRIMINATORS.sendMessage, "hex");
     metadata.participantA = new PublicKey(data.slice(8, 40));
     metadata.participantB = new PublicKey(data.slice(40, 72));
   } else {
-    // channel
-    // BroadcastChannel: 8 (disc) + 32 (owner) + 4 (name len) + N (name) + 4 (count). Count is at 76 (assuming max 32 bytes for name)
     metadata.messageCountOffset = 76;
     metadata.discriminator = Buffer.from(DISCRIMINATORS.sendBroadcast, "hex");
     metadata.owner = new PublicKey(data.slice(8, 40));
@@ -214,13 +183,9 @@ async function _fetchAccountData(
     metadata.channelName = data.slice(44, 44 + channelNameLen).toString("utf8");
   }
 
-  // Explicitly cast to AccountMetadata, assuming the type check above guarantees all fields are set
   return { info: metadata as AccountMetadata, data };
 }
 
-/**
- * Fetches and decrypts messages/broadcasts that have an index >= startingIndex.
- */
 async function _fetchNewMessages(
   connection: Connection,
   metadata: AccountMetadata,
@@ -248,7 +213,6 @@ async function _fetchNewMessages(
           if (programId.equals(PROGRAM_ID)) {
             const ixData = Buffer.from(ix.data);
 
-            // Check for discriminator
             if (
               ixData.length > 8 &&
               ixData.subarray(0, 8).equals(DISCRIMINATOR)
@@ -257,11 +221,9 @@ async function _fetchNewMessages(
               const contentLength = ixData.readUInt32LE(12); // u32
               const encrypted = ixData.slice(16, 16 + contentLength);
 
-              // Only process messages that are new
               if (messageIndex >= startingIndex) {
                 try {
                   const decrypted = decryptMessage(encrypted, sharedSecret);
-                  // Sender is key 1 in the instruction's account list
                   const sender =
                     message.staticAccountKeys[ix.accountKeyIndexes[1]];
 
@@ -273,7 +235,6 @@ async function _fetchNewMessages(
                     signature: sigInfo.signature,
                   });
                 } catch (e) {
-                  // Failed to decrypt message - skip and log if running a command that logs errors
                 }
               }
             }
@@ -281,7 +242,6 @@ async function _fetchNewMessages(
         }
       }
     } catch (error) {
-      // Skip transactions that failed to fetch or parse
     }
   }
 
@@ -289,13 +249,7 @@ async function _fetchNewMessages(
   return messages;
 }
 
-// ============================================================================
-// Commands
-// ============================================================================
 
-/**
- * Initialize a new message thread between two participants.
- */
 async function initThreadCommand(options: any) {
   console.log(chalk.bold.cyan("\n💬 Initialize Message Thread\n"));
   const spinner = ora();
@@ -304,7 +258,6 @@ async function initThreadCommand(options: any) {
     const wallet = loadWallet(options.wallet);
     const connection = createConnection(options.cluster);
     const participantB = new PublicKey(options.recipient);
-    // Generate unique thread ID
     const threadId = crypto.randomBytes(32);
     const [threadPDA] = deriveThreadPDA(
       wallet.publicKey,
@@ -317,9 +270,7 @@ async function initThreadCommand(options: any) {
     console.log(chalk.gray(`  Thread PDA: ${threadPDA.toBase58()}\n`));
 
     spinner.start("Initializing message thread...");
-    // Build initialize instruction
     const initData = Buffer.concat([
-      // Use the hex discriminator for clarity and verification
       Buffer.from(DISCRIMINATORS.initializeThread, "hex"),
       threadId,
     ]);
@@ -351,9 +302,7 @@ async function initThreadCommand(options: any) {
   }
 }
 
-/**
- * Send a message in a message thread.
- */
+
 async function sendMessageCommand(options: any) {
   console.log(chalk.bold.cyan("\n📤 Send Message\n"));
   const spinner = ora();
@@ -365,7 +314,6 @@ async function sendMessageCommand(options: any) {
     spinner.succeed(chalk.green(`Connected to ${options.cluster}`));
     console.log(chalk.gray(`  Thread: ${threadPDA.toBase58()}\n`));
 
-    // Get thread info to determine next message index
     spinner.start("Fetching thread information...");
     const { info: metadata, data: accountData } = await _fetchAccountData(
       connection,
@@ -377,21 +325,18 @@ async function sendMessageCommand(options: any) {
     spinner.succeed(chalk.green(`Thread found`));
     console.log(chalk.gray(`  Current messages: ${messageCount}\n`));
 
-    // Encrypt message
     spinner.start("Encrypting message...");
     const sharedSecret = options.key || "default-secret-key";
     const encrypted = encryptMessage(options.message, sharedSecret);
     spinner.succeed(chalk.green(`Message encrypted`));
     console.log(chalk.gray(`  Size: ${encrypted.length} bytes\n`));
 
-    // Send message
     spinner.start("Sending message...");
     const messageData = Buffer.concat([
-      // Use the hex discriminator for clarity and verification
       Buffer.from(DISCRIMINATORS.sendMessage, "hex"),
-      Buffer.from(new Uint32Array([messageCount]).buffer), // message_index (u32)
-      Buffer.from(new Uint32Array([encrypted.length]).buffer), // content length (u32)
-      encrypted, // encrypted_content (Vec<u8>)
+      Buffer.from(new Uint32Array([messageCount]).buffer), 
+      Buffer.from(new Uint32Array([encrypted.length]).buffer), 
+      encrypted, 
     ]);
     const sendIx = new TransactionInstruction({
       programId: PROGRAM_ID,
@@ -416,9 +361,6 @@ async function sendMessageCommand(options: any) {
   }
 }
 
-/**
- * Read and decrypt messages from a thread's transaction history.
- */
 async function readMessagesCommand(options: any) {
   console.log(chalk.bold.cyan("\n📖 Read Messages (Direct Thread)\n"));
   const spinner = ora();
@@ -456,7 +398,6 @@ async function readMessagesCommand(options: any) {
     console.log(chalk.gray(`  Total messages: ${messageCount}`));
     spinner.succeed(chalk.green(`Extracted ${messages.length} messages\n`));
 
-    // Display messages
     console.log(chalk.bold("Messages:\n"));
     for (const msg of messages) {
       const date = msg.timestamp
@@ -474,9 +415,6 @@ async function readMessagesCommand(options: any) {
   }
 }
 
-/**
- * Initialize a new broadcast channel.
- */
 async function createChannelCommand(options: any) {
   console.log(chalk.bold.cyan("\n📢 Create Broadcast Channel\n"));
   const spinner = ora();
@@ -523,9 +461,7 @@ async function createChannelCommand(options: any) {
   }
 }
 
-/**
- * Send a broadcast message to a channel.
- */
+
 async function sendBroadcastCommand(options: any) {
   console.log(chalk.bold.cyan("\n📡 Send Broadcast Message\n"));
   const spinner = ora();
@@ -537,7 +473,6 @@ async function sendBroadcastCommand(options: any) {
     spinner.succeed(chalk.green(`Connected to ${options.cluster}`));
     console.log(chalk.gray(`  Channel: ${channelPDA.toBase58()}\n`));
 
-    // Get channel info to determine next message index
     spinner.start("Fetching channel information...");
     const { info: metadata, data: accountData } = await _fetchAccountData(
       connection,
@@ -549,14 +484,12 @@ async function sendBroadcastCommand(options: any) {
     spinner.succeed(chalk.green(`Channel found`));
     console.log(chalk.gray(`  Current broadcasts: ${messageCount}\n`));
 
-    // Encrypt message
     spinner.start("Encrypting broadcast content...");
     const sharedSecret = options.key || "default-channel-key";
     const encrypted = encryptMessage(options.message, sharedSecret);
     spinner.succeed(chalk.green(`Content encrypted`));
     console.log(chalk.gray(`  Size: ${encrypted.length} bytes\n`));
 
-    // Send broadcast
     spinner.start("Sending broadcast...");
     const broadcastData = Buffer.concat([
       // Use the hex discriminator for clarity and verification
